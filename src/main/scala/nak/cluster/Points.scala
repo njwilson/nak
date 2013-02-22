@@ -113,7 +113,9 @@ object EuclideanDistance extends DistanceFunction {
  * A trait for functions that transform a set of points from one space to
  * another space that is potentially scaled, reduced, or both.
  */
-trait PointTransformer extends (IndexedSeq[Point] => IndexedSeq[Point])
+trait PointTransformer extends (IndexedSeq[Point] => IndexedSeq[Point]) {
+  def undo(points: IndexedSeq[Point]): IndexedSeq[Point]
+}
 
 /**
  * A companion object to the PointTransformer trait to retrieve the point
@@ -137,6 +139,7 @@ object PointTransformer {
  */
 class IdentityTransformer extends PointTransformer {
   def apply(points: IndexedSeq[Point]) = points
+  def undo(points: IndexedSeq[Point]) = points
 }
 
 /**
@@ -165,6 +168,15 @@ class ZscoreTransformer(
         case (x, (mean, sdev)) => (x - mean) / sdev
       }
       Point(transformed)
+    }
+  }
+
+  def undo(points: IndexedSeq[Point]) = {
+    points.map { point =>
+      val undone = point.coord.zip(means.zip(standardDeviations)).map {
+        case (x, (mean, sdev)) => (x * sdev) + mean
+      }
+      Point(undone)
     }
   }
 
@@ -230,6 +242,18 @@ class PcaTransformer(
     transformed.getArray.map { transformedCoord =>
       Point(transformedCoord.take(numComponents).toIndexedSeq)
     }
+  }
+
+  def undo(points: IndexedSeq[Point]) = {
+    // Get the top `numComponents` eigenvectors
+    val eigenvectors = pca.getEigenvectorsMatrix
+    val topEigenvectors = eigenvectors.getMatrix(0, eigenvectors.getRowDimension() - 1, 0, numComponents - 1)
+
+    // Put the points into a matrix, undo PCA, convert back to Points, and then undo the scaling
+    val pointMatrix = new Matrix(points.map(_.coord.toArray).toArray)
+    val undoneMatrix = pointMatrix.times(topEigenvectors.transpose)
+    val undonePoints = undoneMatrix.getArray.map { undoneCoord => Point(undoneCoord.toIndexedSeq) }
+    scaler.undo(undonePoints)
   }
 
 }
